@@ -6,6 +6,8 @@ config.env
 # 데이터 폴더 (대용량 파일 및 민감한 데이터)
 data/
 *.pdf
+# requirements.txt는 커밋에 포함
+!requirements.txt
 *.txt
 
 # Python
