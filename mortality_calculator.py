@@ -32,14 +32,6 @@ class MortalityCalculator:
                 "high_risk_factor": 1.3
             },
             
-            # 계절 위험도
-            "seasonal_risk": {
-                "봄": 1.0,
-                "여름": 1.1,
-                "가을": 1.0,
-                "겨울": 1.2
-            },
-            
             # 지역 위험도 (도시별 기후 특성)
             "regional_risk": {
                 "서울": 1.0,
@@ -119,10 +111,6 @@ class MortalityCalculator:
             # 최적 습도 범위
             return 1.0
     
-    def calculate_seasonal_risk(self, season: str) -> float:
-        """계절 기반 위험도를 계산합니다."""
-        return self.risk_factors["seasonal_risk"].get(season, 1.0)
-    
     def calculate_regional_risk(self, city: str) -> float:
         """지역 기반 위험도를 계산합니다."""
         return self.risk_factors["regional_risk"].get(city, 1.0)
@@ -149,14 +137,13 @@ class MortalityCalculator:
         # 각 위험도 계산
         temp_risk = self.calculate_temperature_risk(weather_data['temperature'])
         humidity_risk = self.calculate_humidity_risk(weather_data['humidity'])
-        seasonal_risk = self.calculate_seasonal_risk(weather_data['season'])
         regional_risk = self.calculate_regional_risk(weather_data['city'])
         age_risk = self.calculate_age_risk(age_group)
         gender_risk = self.calculate_gender_risk(gender)
         temporal_risk = self.calculate_temporal_risk(weather_data['date'].month)
         
         # 종합 위험도 계산 (곱셈 모델)
-        total_risk = (temp_risk * humidity_risk * seasonal_risk * regional_risk * 
+        total_risk = (temp_risk * humidity_risk * regional_risk * 
                      age_risk * gender_risk * temporal_risk)
         
         # 사망률 계산 (10만명당)
@@ -185,7 +172,6 @@ class MortalityCalculator:
             'risk_factors': {
                 'temperature_risk': round(temp_risk, 3),
                 'humidity_risk': round(humidity_risk, 3),
-                'seasonal_risk': round(seasonal_risk, 3),
                 'regional_risk': round(regional_risk, 3),
                 'age_risk': round(age_risk, 3),
                 'gender_risk': round(gender_risk, 3),
@@ -208,8 +194,7 @@ class MortalityCalculator:
                 'date': row['date'],
                 'city': row['city'],
                 'temperature': row['temperature'],
-                'humidity': row['humidity'],
-                'season': row['season']
+                'humidity': row['humidity']
             }
             
             mortality_result = self.calculate_mortality_rate(weather_dict, age_group, gender)
@@ -220,8 +205,7 @@ class MortalityCalculator:
                     'mortality_rate': mortality_result['mortality_rate'],
                     'risk_level': mortality_result['risk_level'],
                     'temperature': row['temperature'],
-                    'humidity': row['humidity'],
-                    'season': row['season']
+                    'humidity': row['humidity']
                 })
         
         return pd.DataFrame(mortality_data) 
