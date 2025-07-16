@@ -129,57 +129,38 @@ class WeatherAPI:
             }
             
             st.info(f"🌤️ {city}의 {start_date} ~ {end_date} 기상 데이터를 가져오는 중...")
-            
+        
             # API 요청
             response = requests.get(url, params=params, timeout=30)
+            response.encoding = 'euc-kr'  # 한글 인코딩 설정
             response.raise_for_status()
             
             # 응답 데이터 파싱
             data = response.text.strip()
             
+            # 디버깅을 위한 응답 정보 표시
+            st.info(f"📡 API 응답 상태: {response.status_code}")
+            st.info(f"📄 응답 길이: {len(data)} 문자")
+            
             if not data or data.startswith('error'):
                 st.warning(f"⚠️ {city}의 데이터를 가져올 수 없습니다.")
+                st.info(f"📄 응답 내용: {data[:200]}...")
                 return pd.DataFrame()
             
-            # 데이터 파싱
+            # 응답 형식 확인 및 파싱
             weather_data = []
-            lines = data.split('\n')
             
-            for line in lines[1:]:  # 헤더 제외
-                if line.strip():
-                    parts = line.split(',')
-                    if len(parts) >= 15:  # 충분한 컬럼이 있는지 확인
-                        try:
-                            # 날짜 파싱
-                            date_str = parts[0]  # TM: 관측시각
-                            if len(date_str) >= 8:
-                                date = datetime.strptime(date_str[:8], '%Y%m%d')
-                                
-                                # 필요한 기상 데이터만 추출
-                                # TA_AVG: 일 평균기온, TA_MAX: 최고기온, TA_MIN: 최저기온
-                                # HM_AVG: 일 평균 상대습도
-                                temp_avg = float(parts[10]) if parts[10] != '' else None  # TA_AVG
-                                temp_max = float(parts[11]) if parts[11] != '' else None  # TA_MAX
-                                temp_min = float(parts[12]) if parts[12] != '' else None  # TA_MIN
-                                humidity_avg = float(parts[13]) if parts[13] != '' else None  # HM_AVG
-                                
-                                # 기본값 설정 (평균 기온과 평균 습도)
-                                temperature = temp_avg if temp_avg is not None else 20.0
-                                humidity = humidity_avg if humidity_avg is not None else 60.0
-                                
-                                weather_data.append({
-                                    'date': date,
-                                    'city': city,
-                                    'temperature': round(temperature, 1),  # 평균 기온
-                                    'temp_max': round(temp_max, 1) if temp_max is not None else None,  # 최고 기온
-                                    'temp_min': round(temp_min, 1) if temp_min is not None else None,  # 최저 기온
-                                    'humidity': round(humidity, 1),  # 평균 습도
-                                    'month': date.month,
-                                    'year': date.year
-                                })
-                                
-                        except (ValueError, IndexError) as e:
-                            continue  # 잘못된 데이터는 건너뛰기
+            # JSON 형식인지 확인
+            if data.startswith('{') or data.startswith('['):
+                try:
+                    json_data = json.loads(data)
+                    weather_data = self._parse_json_response(json_data, city)
+                except json.JSONDecodeError:
+                    st.warning("JSON 파싱 실패, 텍스트 형식으로 시도합니다.")
+                    weather_data = self._parse_text_response(data, city)
+            else:
+                # 텍스트 형식으로 파싱
+                weather_data = self._parse_text_response(data, city)
             
             if weather_data:
                 df = pd.DataFrame(weather_data)
@@ -197,6 +178,7 @@ class WeatherAPI:
                 return df
             else:
                 st.warning(f"⚠️ {city}의 유효한 기상 데이터를 찾을 수 없습니다.")
+                st.info(f"📄 응답 내용 미리보기: {data[:500]}...")
                 return pd.DataFrame()
                 
         except requests.exceptions.RequestException as e:
@@ -232,92 +214,97 @@ class WeatherAPI:
     
     def _parse_text_response(self, text_data: str, city: str) -> list:
         """기상청 API의 텍스트 형식 응답을 파싱합니다."""
+        from datetime import datetime
+        lines = text_data.split('\n')
+        
+        # 헤더 정보 추출 (실제 API 응답 구조에 맞춤)
+        header_line = None
+        for line in lines:
+            if line.strip().startswith('# YYMMDD'):
+                header_line = line.replace('#', '').strip()
+                break
+        
+        if not header_line:
+            st.warning("헤더 라인을 찾을 수 없습니다.")
+            return []
+        
+        # 헤더에서 컬럼 위치 찾기
+        header_cols = header_line.split()
+        
         try:
-            lines = text_data.split('\n')
-            weather_data = []
+            # 컬럼 인덱스 찾기
+            idx_ymd = header_cols.index('YYMMDD')
             
-            # #START7777 헤더를 찾아서 실제 데이터 시작 위치 확인
-            data_start_index = -1
-            for i, line in enumerate(lines):
-                if '#START7777' in line:
-                    data_start_index = i + 1
-                    break
+            # TA (기온) 컬럼들 찾기
+            ta_indices = [i for i, col in enumerate(header_cols) if col == 'TA']
+            # HM (습도) 컬럼들 찾기  
+            hm_indices = [i for i, col in enumerate(header_cols) if col == 'HM']
             
-            if data_start_index == -1:
-                st.error("데이터 시작 마커(#START7777)를 찾을 수 없습니다.")
+            # 첫 번째 TA는 일 평균기온, 첫 번째 HM은 일 평균습도로 사용
+            if not ta_indices or not hm_indices:
+                st.warning("TA 또는 HM 컬럼을 찾을 수 없습니다.")
                 return []
             
-            # 데이터 라인 찾기 (CSV 형식)
-            for i in range(data_start_index, len(lines)):
-                line = lines[i].strip()
-                if not line or line.startswith('#') or line.startswith('7777'):
+            idx_ta = ta_indices[0]
+            idx_hm = hm_indices[0]
+            
+            st.info(f"📊 컬럼 위치 - YYMMDD: {idx_ymd}, TA: {idx_ta}, HM: {idx_hm}")
+            
+        except (ValueError, IndexError) as e:
+            st.warning(f"헤더 인덱스 추출 오류: {e}")
+            st.info(f"헤더 컬럼: {header_cols}")
+            return []
+
+        # 데이터 파싱
+        weather_data = []
+        for line in lines:
+            # 헤더나 구분자 라인은 제외
+            if (not line.strip() or 
+                line.startswith('#') or 
+                line.startswith('7777') or
+                not line[0].isdigit()):
+                continue
+            
+            fields = line.split()
+            
+            # 필드 수 확인
+            if len(fields) <= max(idx_ymd, idx_ta, idx_hm):
+                continue
+            
+            try:
+                # 날짜 파싱
+                date_str = fields[idx_ymd]
+                if len(date_str) == 8:  # YYYYMMDD
+                    date = datetime.strptime(date_str, "%Y%m%d")
+                else:
                     continue
                 
-                # CSV 형식 파싱 (쉼표로 구분)
-                if len(line) > 10:  # 최소 길이 확인
-                    try:
-                        # 공백으로 분리하여 필드 찾기 (실제 응답은 공백으로 구분됨)
-                        fields = line.split()
-                        if len(fields) < 20:  # 최소 필드 수 확인
-                            continue
-                        
-                        # 날짜 파싱 (첫 번째 필드: YYYYMMDD)
-                        date_str = fields[0].strip()
-                        if len(date_str) == 8 and date_str.isdigit():
-                            date_obj = datetime.strptime(date_str, "%Y%m%d")
-                        else:
-                            continue
-                        
-                        # 지점번호 확인 (두 번째 필드)
-                        station_code = fields[1].strip()
-                        
-                        # 기온 필드 찾기 (TA: 기온)
-                        # 실제 데이터 분석: 11번째 필드(인덱스 10)가 기온 값
-                        temp = None
-                        if len(fields) > 10:
-                            temp_str = fields[10].strip()
-                            if temp_str and temp_str not in ['-9.0', '-99.0', '-9', '-99', '']:
-                                try:
-                                    temp = float(temp_str)
-                                    # 현실적인 기온 범위 확인 (-50 ~ 50도)
-                                    if not (-50 <= temp <= 50):
-                                        temp = None
-                                except ValueError:
-                                    temp = None
-                        
-                        # 습도 필드 찾기 (HM: 상대습도)
-                        # 실제 데이터 분석: 19번째 필드(인덱스 18)가 현실적인 습도 값
-                        humidity = None
-                        if len(fields) > 18:
-                            humidity_str = fields[18].strip()
-                            if humidity_str and humidity_str not in ['-9.0', '-99.0', '-9', '-99', '']:
-                                try:
-                                    humidity = float(humidity_str)
-                                    # 현실적인 습도 범위 확인 (20 ~ 100%)
-                                    if not (20 <= humidity <= 100):
-                                        humidity = None
-                                except ValueError:
-                                    humidity = None
-                        
-                        # 기온과 습도가 모두 유효한 경우만 추가
-                        if temp is not None and humidity is not None:
-                            weather_data.append({
-                                'date': date_obj,
-                                'city': city,
-                                'temperature': temp,
-                                'humidity': humidity,
-                                'month': date_obj.month,
-                                'year': date_obj.year
-                            })
-                        
-                    except (ValueError, IndexError) as e:
-                        continue
-            
-            return weather_data
-            
-        except Exception as e:
-            st.error(f"텍스트 파싱 중 오류: {e}")
-            return []
+                # 기온 파싱
+                ta_str = fields[idx_ta]
+                if ta_str == '-9.0' or ta_str == '-9':
+                    continue  # 결측값
+                ta = float(ta_str)
+                
+                # 습도 파싱
+                hm_str = fields[idx_hm]
+                if hm_str == '-9.0' or hm_str == '-9':
+                    continue  # 결측값
+                hm = float(hm_str)
+                
+                weather_data.append({
+                    'date': date,
+                    'city': city,
+                    'temperature': ta,
+                    'humidity': hm,
+                    'month': date.month,
+                    'year': date.year
+                })
+                
+            except (ValueError, IndexError) as e:
+                continue
+        
+        st.info(f"📊 파싱된 데이터: {len(weather_data)}개")
+        return weather_data
     
     def _parse_json_response(self, data: dict, city: str) -> list:
         """기상청 API의 JSON 형식 응답을 파싱합니다."""

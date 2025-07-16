@@ -114,13 +114,54 @@ if st.button("📊 30일 기상 데이터 분석 시작", type="primary", use_co
         stats = calculate_statistics(historical_data)
         display_statistics(stats)
         
-        # Streamlit 탭 시스템 사용
-        tab1, tab2, tab3, tab4 = st.tabs([
+        # 예측 완료 상태 확인하여 결과 요약 표시
+        if st.session_state.get('prediction_executed', False) and st.session_state.get('weather_predictions') is not None:
+            st.markdown("---")
+            st.subheader("🎉 예측 완료! 결과 요약")
+            
+            # 간단한 결과 요약 표시
+            weather_pred = st.session_state.weather_predictions.iloc[-1]
+            mortality_result = st.session_state.mortality_result
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("예측 기온", f"{weather_pred['temperature']:.1f}°C")
+            with col2:
+                st.metric("예측 습도", f"{weather_pred['humidity']:.1f}%")
+            with col3:
+                if mortality_result:
+                    st.metric("사망률", f"{mortality_result['mortality_rate']:.2f}%")
+                else:
+                    st.metric("사망률", "계산 중")
+            with col4:
+                if mortality_result:
+                    risk_level = "높음" if mortality_result['mortality_rate'] > 0.5 else "보통" if mortality_result['mortality_rate'] > 0.3 else "낮음"
+                    st.metric("위험도", risk_level)
+                else:
+                    st.metric("위험도", "분석 중")
+            
+            # 예측 탭으로 이동 안내
+            st.info("💡 자세한 예측 결과는 아래 '🔮 예측 분석' 탭에서 확인하세요!")
+            st.markdown("---")
+        
+        # 예측 완료 상태에 따른 탭 제목 설정
+        if st.session_state.get('prediction_executed', False):
+            tab_titles = [
+                "📈 기상 트렌드", 
+                "🔍 30일 패턴 분석", 
+                "🔮 예측 결과 ✅", 
+                "📊 상세 분석"
+            ]
+        else:
+            tab_titles = [
             "📈 기상 트렌드", 
             "🔍 30일 패턴 분석", 
             "🔮 예측 분석", 
             "📊 상세 분석"
-        ])
+            ]
+        
+        # Streamlit 탭 시스템 사용
+        tab1, tab2, tab3, tab4 = st.tabs(tab_titles)
         
         # 기상 트렌드 탭
         with tab1:
@@ -174,23 +215,53 @@ if st.button("📊 30일 기상 데이터 분석 시작", type="primary", use_co
         
         # 예측 분석 탭
         with tab3:
-            st.subheader("🔮 기상 및 사망률 예측")
-            
-            # 30일 데이터 기반 예측 정보 표시
-            st.info(f"📊 최근 30일 데이터 기반 예측 ({len(historical_data)}개 데이터 포인트)")
+            if st.session_state.get('prediction_executed', False):
+                st.subheader("🎉 예측 결과")
+                st.success("✅ 예측이 완료되었습니다!")
+            else:
+                st.subheader("🔮 기상 및 사망률 예측")
+                
+                # 30일 데이터 기반 예측 정보 표시
+                st.info(f"📊 최근 30일 데이터 기반 예측 ({len(historical_data)}개 데이터 포인트)")
             
             # 예측 실행 버튼
-            col1, col2 = st.columns([1, 3])
-            with col1:
-                # 고유한 key로 버튼 생성
-                button_key = f"predict_button_{id(historical_data)}"
-                if st.button("🚀 예측 실행", key=button_key, type="primary"):
-                    st.session_state.run_prediction = True
-                    st.session_state.prediction_data_id = id(historical_data)
+            if st.session_state.get('prediction_executed', False):
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    # 재예측 버튼
+                    button_key = f"repredict_button_{id(historical_data)}"
+                    if st.button("🔄 재예측", key=button_key, type="primary"):
+                        # 재예측 시 상태 초기화 (리로딩 방지)
+                        st.session_state.update({
+                            'prediction_executed': False,
+                            'run_prediction': True,
+                            'prediction_data_id': id(historical_data),
+                            'weather_predictions': None,
+                            'mortality_result': None
+                        })
+                with col2:
+                    # 예측 결과 초기화 버튼
+                    clear_key = f"clear_button_{id(historical_data)}"
+                    if st.button("🗑️ 결과 초기화", key=clear_key):
+                        # 상태 초기화 (st.rerun() 제거하여 리로딩 방지)
+                        st.session_state.update({
+                            'prediction_executed': False,
+                            'weather_predictions': None,
+                            'mortality_result': None
+                        })
+            else:
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    # 고유한 key로 버튼 생성
+                    button_key = f"predict_button_{id(historical_data)}"
+                    if st.button("🚀 예측 실행", key=button_key, type="primary"):
+                        st.session_state.run_prediction = True
+                        st.session_state.prediction_data_id = id(historical_data)
             
             # 예측 실행 상태 확인 (데이터 ID도 확인)
             if (st.session_state.get('run_prediction', False) and 
                 st.session_state.get('prediction_data_id') == id(historical_data)):
+                
                 with st.spinner("30일 데이터 기반 예측을 수행하는 중..."):
                     # 예측 데이터 준비
                     prediction_data = historical_data.copy()
@@ -198,30 +269,43 @@ if st.button("📊 30일 기상 데이터 분석 시작", type="primary", use_co
                     # 시간 가중치 기반 미래 기상 예측
                     days_ahead = (settings['prediction_date'] - datetime.now().date()).days
                     st.info(f"🔮 시간 가중치 기반 예측 모델로 {days_ahead}일 후까지 예측합니다...")
-                    weather_predictions = weather_predictor.predict_weather(prediction_data, days_ahead)
                     
-                    if not weather_predictions.empty:
-                        # 사망률 계산
-                        weather_dict = {
-                            'date': weather_predictions.iloc[-1]['date'],
-                            'city': settings['selected_city'],
-                            'temperature': weather_predictions.iloc[-1]['temperature'],
-                            'humidity': weather_predictions.iloc[-1]['humidity']
-                        }
+                    try:
+                        weather_predictions = weather_predictor.predict_weather(prediction_data, days_ahead)
                         
-                        mortality_result = mortality_calculator.calculate_mortality_rate(
-                            weather_dict, settings['selected_age_group'], settings['selected_gender']
-                        )
-                        
-                        # 예측 결과를 세션 상태에 저장
-                        st.session_state.weather_predictions = weather_predictions
-                        st.session_state.mortality_result = mortality_result
-                        st.session_state.prediction_executed = True
-                        
-                        # 예측 완료 메시지
-                        st.success("✅ 예측이 완료되었습니다!")
-                        
-                        # 예측 실행 상태는 결과 표시 후에 초기화 (리로딩 방지)
+                        if not weather_predictions.empty:
+                            # 사망률 계산
+                            weather_dict = {
+                                'date': weather_predictions.iloc[-1]['date'],
+                                'city': settings['selected_city'],
+                                'temperature': weather_predictions.iloc[-1]['temperature'],
+                                'humidity': weather_predictions.iloc[-1]['humidity']
+                            }
+                            
+                            mortality_result = mortality_calculator.calculate_mortality_rate(
+                                weather_dict, settings['selected_age_group'], settings['selected_gender']
+                            )
+                            
+                            # 예측 결과를 한 번에 저장 (리로딩 방지)
+                            st.session_state.weather_predictions = weather_predictions
+                            st.session_state.mortality_result = mortality_result
+                            st.session_state.prediction_executed = True
+                            # 예측 실행 상태 초기화 (탭 이동 방지를 위해 st.rerun() 제거)
+                            st.session_state.run_prediction = False
+                            st.session_state.prediction_data_id = None
+                            
+                            # 예측 완료 알림 (즉시 표시)
+                            st.success("🎉 예측이 완료되었습니다! 아래에서 결과를 확인하세요!")
+                            st.balloons()  # 성공 효과
+                            
+                        else:
+                            st.error("❌ 예측 데이터 생성에 실패했습니다.")
+                            # 실패 시 상태 초기화
+                            st.session_state.run_prediction = False
+                            st.session_state.prediction_data_id = None
+                    except Exception as e:
+                        st.error(f"❌ 예측 중 오류가 발생했습니다: {str(e)}")
+                        # 오류 시 상태 초기화
                         st.session_state.run_prediction = False
                         st.session_state.prediction_data_id = None
             
@@ -230,15 +314,14 @@ if st.button("📊 30일 기상 데이터 분석 시작", type="primary", use_co
                 weather_predictions = st.session_state.weather_predictions
                 mortality_result = st.session_state.mortality_result
                 
-                st.success("✅ 예측 결과가 있습니다.")
+                # 예측 결과 하이라이트
+                st.markdown("### 📊 예측 결과 대시보드")
+                st.markdown("---")
                 
                 # 예측 결과 표시
                 ui_components.display_prediction_results(weather_predictions, mortality_result, settings['selected_city'], settings['prediction_date'])
                 
-                # 예측 결과 표시 후 실행 상태 초기화 (리로딩 방지)
-                if st.session_state.get('run_prediction', False):
-                    st.session_state.run_prediction = False
-                    st.session_state.prediction_data_id = None
+                # 중복된 상태 변경 제거 (리로딩 방지)
                 
                 if mortality_result:
                     # 위험도 분석 차트

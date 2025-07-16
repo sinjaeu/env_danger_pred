@@ -321,7 +321,7 @@ class WeatherPredictor:
             })
         
         predictions_df = pd.DataFrame(predictions)
-        
+    
         # 모델 성능 평가
         self._evaluate_model_performance(data_with_features, available_features)
         

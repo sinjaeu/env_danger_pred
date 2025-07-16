@@ -198,13 +198,13 @@ class WeatherVisualizer:
         fig.add_trace(go.Scatter(
             x=data['temperature'],
             y=data['humidity'],
-            mode='markers',
+                    mode='markers',
             name='기상 데이터',
-            marker=dict(
+                    marker=dict(
                 color='#636EFA',
                 size=8,
-                opacity=0.7
-            ),
+                        opacity=0.7
+                    ),
             hovertemplate='<b>%{text}</b><br>' +
                         '기온: %{x:.1f}°C<br>' +
                         '습도: %{y:.1f}%<br>' +
@@ -249,7 +249,7 @@ class WeatherVisualizer:
         for factor, value in risk_factors.items():
             summary += f"- **{factor}**: {value:.1f}%\n"
         
-        return summary
+        return summary 
 
     def create_30day_pattern_chart(self, data: pd.DataFrame, title: str = "30일 패턴 분석") -> go.Figure:
         """30일 데이터 패턴 분석 차트를 생성합니다."""
